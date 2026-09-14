@@ -6,10 +6,10 @@ use moirai_protocol::broadcast::tcsb::Tcsb;
 use moirai_protocol::replica::{IsReplica, Replica};
 use moirai_protocol::state::log::IsLog;
 
-use crate::generic::{GenericNode, NetworkOp};
+use moirai_network::generic::{GenericNode, NetworkOp};
 use crate::network_omega::{Omega, ReplicaStatus};
-use crate::transport::{CrdtTransport, PeerStatus, TransportMessage};
-use crate::HashSet;
+use moirai_network::transport::{CrdtTransport, PeerStatus, TransportMessage};
+use moirai_network::HashSet;
 
 /// A network node with periodic, randomly sampled peer liveness checks.
 pub struct GenericCommitNode<L: IsLog, T: CrdtTransport<Op = L::Op>>

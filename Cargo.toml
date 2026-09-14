@@ -6,6 +6,7 @@ members = [
     "moirai-fuzz",
     "moirai-macros",
     "moirai-network",
+    "moirai-commit-network",
     "moirai-bootnode",
     "moirai-relay",
     "moirai-dashboard",

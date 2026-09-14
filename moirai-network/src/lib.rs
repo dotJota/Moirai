@@ -39,8 +39,3 @@ pub mod workload;
 
 pub type HashMap<K, V> = rustc_hash::FxHashMap<K, V>;
 pub type HashSet<V> = rustc_hash::FxHashSet<V>;
-
-#[path = "../../moirai-commit-network/network_omega.rs"]
-pub mod network_omega;
-#[path = "../../moirai-commit-network/generic_commit_node.rs"]
-pub mod generic_commit_node;

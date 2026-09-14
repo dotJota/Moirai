@@ -1,0 +1,8 @@
+{
+    "replica_id": "a",
+    "listen_port": 9001,
+    "http_port": 8081,
+    "peers": [
+        "b:127.0.0.1:9002"
+    ]
+}

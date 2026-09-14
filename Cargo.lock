@@ -1421,6 +1421,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "moirai-commit-network"
+version = "0.1.0"
+dependencies = [
+ "moirai-crdt",
+ "moirai-network",
+ "moirai-protocol",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "moirai-crdt"
 version = "0.6.0"
 dependencies = [

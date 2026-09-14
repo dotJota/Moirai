@@ -6,24 +6,22 @@
 //! Leader updates are forwarded to the commitment log's internal oracle,
 //! which adds a leader vote to each submitted operation automatically.
 //!
-//! Run the commands below from the workspace root. `REPLICA_ID` defaults to
-//! `replica-a`, and `LISTEN_PORT` defaults to `9001`. Set `HTTP_PORT` to enable
-//! the HTTP API. `PEERS` is a comma-separated list of `id:host:port` entries;
-//! list every other cluster member and use a unique ID and ports for each node.
-//! Wait for the nodes to enter their event loops before submitting operations.
+//! Run the commands below from `moirai-commit-network`. The main thread receives
+//! a json file path as an argument, used to read a json configuration file.
+//! The json file should specify the replica ID, listening TCP port, listening
+//! HTTP port (optional) and peer adress information. Examples of configurations
+//! are given in "config_solo.json" and "config_a.json" - "config_b.json" for
+//! the cases with a single replica and two replicas respectively.
 //!
 //! # Usage
 //!
 //! ```bash
 //! # Single node
-//! REPLICA_ID=a LISTEN_PORT=9001 HTTP_PORT=8081 \
-//!     cargo run -p moirai-network --example commit_awset_node
+//! cargo run -p moirai-commit-network --example commit_awset_node examples/config_solo.json
 //!
 //! # Two-node cluster
-//! REPLICA_ID=a LISTEN_PORT=9001 HTTP_PORT=8081 PEERS=b:127.0.0.1:9002 \
-//!     cargo run -p moirai-network --example commit_awset_node &
-//! REPLICA_ID=b LISTEN_PORT=9002 HTTP_PORT=8082 PEERS=a:127.0.0.1:9001 \
-//!     cargo run -p moirai-network --example commit_awset_node &
+//! cargo run -p moirai-commit-network --example commit_awset_node examples/config_a.json &
+//! cargo run -p moirai-commit-network --example commit_awset_node examples/config_b.json &
 //! ```
 //!
 //! # HTTP API
@@ -66,6 +64,9 @@
 //! curl http://localhost:8081/api/operations
 //! ```
 
+extern crate serde_json;
+use serde::Deserialize;
+use std::fs::File;
 use std::env;
 use std::thread;
 use std::time::Duration;
@@ -73,7 +74,7 @@ use std::time::Duration;
 use moirai_crdt::set::aw_set::AWSet;
 use moirai_network::composite::CompositeTransport;
 use moirai_network::generic::GenericNode;
-use moirai_network::generic_commit_node::GenericCommitNode;
+use moirai_commit_network::generic_commit_node::GenericCommitNode;
 use moirai_protocol::broadcast::internalizer::Resolver;
 use moirai_protocol::commitment::commit_log::CommitmentLog;
 use moirai_protocol::commitment::oracle::{IsOracle, Omega};
@@ -85,6 +86,19 @@ use moirai_protocol::event::Event;
 use moirai_protocol::replica::{IsReplica, Replica};
 use moirai_protocol::state::log::IsLog;
 use moirai_protocol::state::po_log::VecLog;
+
+// Configuration file arguments
+// replica_id: Arbitrary string, e.g. "a".
+// listen_port: TCP listening port, e.g. 9001.
+// http_port: HTTP listening port, e.g. 8081, this entry is optional.
+// peers: Adresses of other replicas, if there are no other peers, an empty vector should be provided.
+#[derive(Debug, Deserialize)]
+struct Config {
+    replica_id: String,
+    listen_port: u16,
+    http_port: Option<u16>,
+    peers: Vec<String>,
+}
 
 // Newtype wrapper to implement QueryableLog (Rust orphan rules require a local type)
 #[derive(Debug, Clone, Default)]
@@ -149,18 +163,16 @@ impl moirai_network::query::QueryableLog for AWSetLog {
 }
 
 fn main() {
-    let replica_id = env::var("REPLICA_ID").unwrap_or_else(|_| "replica-a".to_string());
-    let listen_port: u16 = env::var("LISTEN_PORT")
-        .unwrap_or_else(|_| "9001".to_string())
-        .parse()
-        .expect("Invalid LISTEN_PORT");
-    let http_port: Option<u16> = env::var("HTTP_PORT").ok().and_then(|p| p.parse().ok());
-    let peers_str = env::var("PEERS").unwrap_or_default();
+    let args: Vec<String> = env::args().collect();
+    let file_path = &args[1];
+    let file = File::open(file_path).unwrap();
+    let node_config: Config = serde_json::from_reader(file).expect("The file provided doesn't match the configuration specification.");
 
     // Parse PEERS=id:host:port,...
     let mut peer_addresses: HashMap<String, String> = HashMap::default();
-    let mut all_members: Vec<String> = vec![replica_id.clone()];
-    for spec in peers_str.split(',').filter(|s| !s.is_empty()) {
+    let mut all_members: Vec<String> = vec![node_config.replica_id.clone()];
+
+    for spec in &node_config.peers {
         let parts: Vec<&str> = spec.split(':').collect();
         if parts.len() >= 3 {
             let peer_id = parts[0].to_string();
@@ -174,13 +186,17 @@ fn main() {
 
     let state = AWSetLog(CommitmentLog::new(
         VecLog::default(),
-        Omega::with_leader(replica_id.clone()),
+        Omega::with_leader(node_config.replica_id.clone()),
         Resolver::default(),
     ));
-    let transport = CompositeTransport::new(replica_id.clone(), listen_port, peer_addresses)
-        .expect("Failed to create TCP transport");
+    let transport = CompositeTransport::new(
+        node_config.replica_id.clone(),
+        node_config.listen_port,
+        peer_addresses
+    ).expect("Failed to create TCP transport");
+
     let mut node = GenericNode::with_transport_and_state(
-        replica_id.clone(),
+        node_config.replica_id.clone(),
         &member_refs,
         transport,
         state,
@@ -190,11 +206,11 @@ fn main() {
     node.enable_state_query();
 
     // Start HTTP API if port is specified
-    if let Some(port) = http_port {
+    if let Some(port) = node_config.http_port {
         node.start_http(port);
         eprintln!(
             "[{}] HTTP API listening on http://0.0.0.0:{}",
-            replica_id, port
+            &node_config.replica_id, port
         );
     }
 
@@ -204,16 +220,16 @@ fn main() {
 
     eprintln!(
         "[{}] Commitment AWSet node running. Submit ops to http://localhost:{}/api/op",
-        replica_id,
-        http_port.unwrap_or(0)
+        node_config.replica_id,
+        node_config.http_port.unwrap_or(0)
     );
     eprintln!(
         "[{}] Query state at http://localhost:{}/api/state",
-        replica_id,
-        http_port.unwrap_or(0)
+        node_config.replica_id,
+        node_config.http_port.unwrap_or(0)
     );
     eprintln!("[{}] Example: curl -X POST http://localhost:{}/api/op -H 'Content-Type: application/json' -d '{{\"Add\":\"apple\"}}'",
-        replica_id, http_port.unwrap_or(0));
+        node_config.replica_id, node_config.http_port.unwrap_or(0));
 
     // Run the event loop
     let mut node = GenericCommitNode::new(node, Duration::from_secs(1), 3);

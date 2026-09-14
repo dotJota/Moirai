@@ -1,0 +1,18 @@
+[package]
+name = "moirai-commit-network"
+version = "0.1.0"
+edition = "2021"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Commitment-enabled network nodes for distributed Moirai CRDT replicas"
+
+[dependencies]
+moirai-network = { path = "../moirai-network" }
+moirai-protocol = { path = "../moirai-protocol", features = ["serde"] }
+
+[dev-dependencies]
+moirai-crdt = { path = "../moirai-crdt", features = ["serde"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.133"

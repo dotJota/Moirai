@@ -808,7 +808,7 @@ where
     /// Incoming messages are borrowed by the observer, then processed normally,
     /// including applying sync-response batches to the local replica.
     /// `None` denotes the end of an iteration, after all messages are handled.
-    pub(crate) fn run_with_observer<F>(&mut self, mut observe: F)
+    pub fn run_with_observer<F>(&mut self, mut observe: F)
     where
         F: FnMut(
             &mut Replica<L, Tcsb<L::Op>>,

@@ -24,10 +24,13 @@ use petgraph::graph::DiGraph;
 use petgraph::visit::EdgeRef;
 #[cfg(feature = "fuzz")]
 use rand::seq::IteratorRandom;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::{HashMap, HashSet};
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "test_utils", derive(DeepSizeOf))]
 pub enum Graph<V, E> {
     /// Add a vertex with identifier `V`. `V` must be unique.

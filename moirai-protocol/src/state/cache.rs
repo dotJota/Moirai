@@ -68,8 +68,20 @@ impl<V> Clone for CacheCell<V> {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(
+        transparent,
+        bound(
+            serialize = "L: serde::Serialize",
+            deserialize = "L: serde::Deserialize<'de>"
+        )
+    )
+)]
 pub struct CachedLog<L: IsLog> {
     inner: L,
+    #[cfg_attr(feature = "serde", serde(skip, default = "CacheCell::new"))]
     read_cache: CacheCell<L::Value>,
 }
 

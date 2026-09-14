@@ -6,6 +6,7 @@ macro_rules! union {
         $crate::paste::paste! {
             /// List of variant names, used in the `Choose` operation to select a variant
             #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             pub enum [<$union Variant>] {
                 $(
                     $variant,
@@ -14,6 +15,7 @@ macro_rules! union {
 
             /// Set of Union CRDT operations
             #[derive(Clone, Debug)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             pub enum $union {
                 $(
                     $variant($ty),
@@ -35,6 +37,7 @@ macro_rules! union {
 
             /// Set of Union CRDT child logs, one for each variant
             #[derive(Clone, Debug)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             pub enum [<$union Child>] {
                 $(
                     $variant($log),
@@ -54,6 +57,7 @@ macro_rules! union {
 
             /// Value returned by the child log of each variant
             #[derive(Clone, Debug)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             pub enum [<$union ChildValue>] {
                 $(
                     $variant(<$log as $crate::moirai_protocol::state::log::IsLog>::Value),
@@ -62,6 +66,7 @@ macro_rules! union {
 
             /// Value returned by the union log, which may be a single value, a conflict of values, or unset.
             #[derive(Clone, Debug, Default, PartialEq)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             pub enum [<$union Value>] {
                 #[default]
                 Unset,
@@ -71,6 +76,7 @@ macro_rules! union {
 
             /// Internal Union log state
             #[derive(Clone, Debug, Default)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             pub enum [<$union Container>] {
                 #[default]
                 Unset,
@@ -80,6 +86,7 @@ macro_rules! union {
 
             /// Union log
             #[derive(Clone, Debug, Default)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             pub struct [<$union Log>] {
                 pub child: [<$union Container>],
             }

@@ -1,3 +1,5 @@
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, fmt::Debug, hash::Hash};
 
 #[cfg(feature = "fuzz")]
@@ -21,6 +23,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum EWFlagSet<V> {
     Add(V),
     Remove(V),
@@ -28,6 +31,7 @@ pub enum EWFlagSet<V> {
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct EWFlagSetLog<V: Clone + Hash + Debug + Eq> {
     inner: UWMapLog<V, VecLog<EWFlag>>,
 }

@@ -15,12 +15,14 @@ use moirai_protocol::{
 use rand::RngExt;
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Optional<O> {
     Set(O),
     Unset,
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OptionLog<L>
 where
     L: IsLog,

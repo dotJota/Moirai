@@ -1,3 +1,5 @@
+#[cfg(feature = "serde")]
+use crate::broadcast::tcsb::StateSnapshot;
 use std::fmt::Debug;
 
 #[cfg(feature = "test_utils")]
@@ -9,7 +11,7 @@ use crate::{
     broadcast::{
         internalizer::Interner,
         message::{BatchMessage, EventMessage, SinceMessage},
-        tcsb::IsTcsb,
+        tcsb::{IsTcsb, StabilitySnapshot},
     },
     crdt::{eval::EvalNested, query::QueryOperation},
     event::Event,
@@ -22,6 +24,7 @@ pub type ReplicaIdOwned = String;
 /// Local index of the replica. It is an alias for its string ID.
 #[cfg_attr(feature = "test_utils", derive(DeepSizeOf))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ReplicaIdx(pub usize);
 
 /// A replica in the system, which maintains a local state and communicates with other replicas via messages.
@@ -129,7 +132,48 @@ where
     L: IsLog,
     T: IsTcsb<L::Op> + Debug,
 {
+    /// Current causal-stability bookkeeping. See [`StabilitySnapshot`].
+    ///
+    /// Available without `test_utils` on purpose: this is what a running
+    /// replica has to expose for causal stability to be measurable at all.
+    pub fn stability(&self) -> StabilitySnapshot {
+        self.tcsb.stability()
+    }
+
+    /// The CRDT log itself, so that a donor can serialize it for a joiner.
+    ///
+    /// Not the *value*: `query` renders the state for reading, which cannot be
+    /// replayed onto. State transfer moves the log.
+    pub fn log(&self) -> &L {
+        &self.state
+    }
+
+    /// `true` when this replica has already delivered an operation originated
+    /// by `id`. The donor-side guard for state transfer; see
+    /// [`IsTcsb::has_history_for`].
+    pub fn has_history_for(&self, id: &ReplicaId) -> bool {
+        self.tcsb.has_history_for(id)
+    }
+
+    /// Everything a fresh replica needs to catch up with this one.
+    #[cfg(feature = "serde")]
+    pub fn snapshot(&self) -> StateSnapshot<L::Op> {
+        self.tcsb.snapshot()
+    }
+
+    /// Take over a donor's state wholesale.
+    ///
+    /// The log and the causal bookkeeping have to move together: a matrix clock
+    /// claiming operations the log does not contain would make the joiner
+    /// silently reject them as duplicates forever.
+    #[cfg(feature = "serde")]
+    pub fn adopt(&mut self, snapshot: StateSnapshot<L::Op>, state: L) {
+        self.tcsb.adopt(snapshot);
+        self.state = state;
+    }
+
     fn deliver(&mut self, event: Event<L::Op>) {
+        crate::state::trace::begin(event.id(), event.lamport());
         // Keep track of the effects of the event on the state (e.g., object creation, deletion, etc.)
         let mut sink = SinkCollector::new();
         let mut ctx = EffectContext::root("root", Some(&mut sink));

@@ -2,6 +2,7 @@ use crate::commitment::leader_vote::LeaderVote;
 
 /// A commitment operation, which consists of an updateoperation and a vote for a leader
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CommitOp<O> {
     /// Update operation
     pub op: O,

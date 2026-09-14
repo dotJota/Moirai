@@ -16,6 +16,8 @@ use moirai_protocol::{
 };
 #[cfg(feature = "fuzz")]
 use rand::RngExt;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::{
     list::eg_walker::{List as SimpleList, ReadAt},
@@ -23,6 +25,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "test_utils", derive(DeepSizeOf))]
 pub enum NestedList<O> {
     /// Insert a new child CRDT at the given position
@@ -38,6 +41,14 @@ pub enum NestedList<O> {
 /// Maintains both the logical ordering of children (via EgWalker) and the
 /// actual child CRDT instances.
 #[derive(Debug, Clone)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(bound(
+        serialize = "L: serde::Serialize",
+        deserialize = "L: serde::de::DeserializeOwned"
+    ))
+)]
 pub struct NestedListLog<L>
 where
     L: IsLog,

@@ -5,6 +5,8 @@ use std::{
 
 #[cfg(feature = "test_utils")]
 use deepsize::DeepSizeOf;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::{
     broadcast::internalizer::{Interner, Resolver},
@@ -14,6 +16,7 @@ use crate::{
 
 /// Represents the unique identifier for an event.
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "test_utils", derive(DeepSizeOf))]
 pub struct EventId {
     /// The index of the replica that issued the event.
@@ -84,6 +87,7 @@ impl EventId {
 /// instead, so it can safely be embedded in operation payloads.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 #[cfg_attr(feature = "test_utils", derive(DeepSizeOf))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ResolvedEventId {
     /// Plain string identifier of the issuing replica.
     origin_id: ReplicaIdOwned,

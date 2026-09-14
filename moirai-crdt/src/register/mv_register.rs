@@ -15,10 +15,13 @@ use moirai_protocol::{
 };
 #[cfg(feature = "fuzz")]
 use rand::{Rng, RngExt};
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::HashSet;
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "test_utils", derive(DeepSizeOf))]
 pub enum MVRegister<V> {
     Clear,

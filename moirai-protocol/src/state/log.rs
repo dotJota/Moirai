@@ -105,6 +105,7 @@ impl<L: IsLog> IsLog for Box<L> {
 /// Use `BoxedLog<L>` when recursive generated log types need the corresponding
 /// read value to remain boxed as `Box<L::Value>`.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BoxedLog<L: IsLog>(Box<L>);
 
 impl<L: IsLog> BoxedLog<L> {

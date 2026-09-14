@@ -1,0 +1,55 @@
+[package]
+name = "moirai-network"
+version = "0.1.0"
+edition = "2021"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Network replica binary for distributed Moirai CRDT replicas"
+
+[lib]
+name = "moirai_network"
+path = "src/lib.rs"
+
+[dependencies]
+moirai-crdt = { path = "../moirai-crdt", features = ["serde"] }
+moirai-protocol = { path = "../moirai-protocol", features = ["serde"] }
+rustc-hash = "2.1.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.133"
+tiny_http = "0.12"
+# The state transfer's `log` field is compressed, and only that field: the relay
+# copies `msg` through as a `RawValue` without parsing it (`routing.rs`), so
+# compressing the frame would end that guarantee while compressing the field
+# leaves it untouched. `rust_backend` is `miniz_oxide`, so this stays a pure-Rust
+# build and the container image needs no C toolchain it does not already have.
+flate2 = { version = "1.0", default-features = false, features = ["rust_backend"] }
+# Already in the tree via `reqwest`; named here because this crate now uses it
+# directly. Deflate output is binary and a `TransportMessage` is a line of JSON.
+base64 = "0.22"
+# `blocking` keeps every call site a plain function: no runtime to set up, and
+# both users — the e2e harness and the bootnode poll thread in `discovery.rs`
+# — are sequences of request/poll steps. This was a dev-dependency until
+# discovery needed an HTTP client at run time.
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "blocking",
+] }
+
+# Dev-only, and deliberately so: `testcontainers` pulls tokio, which must not
+# reach the library — the whole codebase is synchronous. The `blocking` feature
+# is its sync runner, which keeps the harness a sequence of plain function
+# calls like everything around it.
+#
+# `bollard` and `tokio` are not extra dependencies: `testcontainers` already
+# brings both, and they are named here only so the harness can use the one
+# operation the container library does not expose — attaching a container to a
+# *second* network, which is what makes a partition genuine while leaving the
+# replica observable. See the backend's header.
+[dev-dependencies]
+anyhow = "1.0"
+bollard = "0.20"
+serde_json = "1.0.133"
+testcontainers = { version = "0.27", features = ["blocking"] }
+tokio = { version = "1", features = ["rt"] }

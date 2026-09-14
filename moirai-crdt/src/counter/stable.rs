@@ -16,6 +16,7 @@ use crate::counter::{
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "test_utils", derive(DeepSizeOf))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CounterStable<V>(V);
 
 impl<V> CounterStable<V> {

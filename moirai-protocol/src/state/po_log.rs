@@ -11,12 +11,15 @@ use crate::{
         replicated_data_type::{CausalReset, ReplicatedDataType, UsesUnstableService},
     },
     event::{Event, id::EventId, lamport::Lamport, tagged_op::TaggedOp},
+    state::trace,
     state::{
         cache::CachedLog, effect_context::EffectContext, log::IsLog, stable_state::IsStableState,
         unstable_state::IsUnstablePrune,
     },
     utils::hashmap::HashMap,
 };
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 pub type RawVecLog<O> = POLog<O, Vec<TaggedOp<O>>>;
 pub type RawMapLog<O> = POLog<O, HashMap<EventId, TaggedOp<O>>>;
@@ -26,6 +29,7 @@ pub type VecLog<O> = CachedVecLog<O>;
 pub type MapLog<O> = CachedMapLog<O>;
 
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 // #[cfg_attr(feature = "test_utils", derive(DeepSizeOf))]
 pub struct POLog<O, U>
 where
@@ -63,6 +67,7 @@ where
     fn effect(&mut self, event: Event<Self::Op>, _ctx: &mut EffectContext<'_>) {
         let new_tagged_op = TaggedOp::from(&event);
         if O::redundant_itself(&new_tagged_op, &self.stable, self.unstable.iter()) {
+            trace::note_redundant_on_arrival();
             if !O::DISABLE_R_WHEN_R {
                 self.prune_redundant_ops(
                     O::redundant_by_when_redundant,
@@ -79,6 +84,7 @@ where
                 );
             }
             self.unstable.append(event);
+            trace::note_applied();
         }
     }
 
@@ -122,6 +128,7 @@ where
                 }
             }
             CausalReset::Prune => {
+                trace::note_reset();
                 self.stable.clear();
                 if conservative {
                     self.unstable
@@ -182,12 +189,18 @@ where
             // Note: the new operation is not in the log at this point.
             let is_conc = !old_tagged_op.id().is_predecessor_of(version);
 
-            !rdnt(
+            let redundant = rdnt(
                 old_tagged_op.op(),
                 Some(old_tagged_op.tag()),
                 is_conc,
                 new_tagged_op,
-            )
+            );
+            if redundant {
+                // The relation has already decided; this only writes down which
+                // operation lost, and whether it lost to concurrency or to time.
+                trace::note_superseded(old_tagged_op.id(), is_conc);
+            }
+            !redundant
         });
     }
 }

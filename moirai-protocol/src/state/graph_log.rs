@@ -21,6 +21,14 @@ use crate::{
 pub type GraphLog<O> = CachedLog<RawGraphLog<O>>;
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound(
+        serialize = "O: serde::Serialize, O::StableState: serde::Serialize",
+        deserialize = "O: serde::Deserialize<'de>, O::StableState: serde::Deserialize<'de>"
+    ))
+)]
 pub struct RawGraphLog<O>
 where
     O: ReplicatedDataType,
@@ -67,6 +75,7 @@ where
 
     fn effect(&mut self, event: Event<Self::Op>, _ctx: &mut EffectContext<'_>) {
         self.unstable.append(event);
+        crate::state::trace::note_applied();
     }
 
     fn redundant_by_parent(&mut self, version: &Version, conservative: bool) {

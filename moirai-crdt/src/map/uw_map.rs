@@ -19,10 +19,13 @@ use moirai_protocol::{
 };
 #[cfg(feature = "fuzz")]
 use rand::Rng;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 use crate::HashMap;
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "test_utils", derive(DeepSizeOf))]
 pub enum UWMap<K, O> {
     Update(K, O),
@@ -31,11 +34,20 @@ pub enum UWMap<K, O> {
 }
 
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound(
+        serialize = "K: Serialize, L: Serialize",
+        deserialize = "K: Deserialize<'de>, L: Deserialize<'de>"
+    ))
+)]
 pub struct UWMapLog<K, L>
 where
     K: Clone + Eq + Hash,
     L: IsLog,
 {
+    #[cfg_attr(feature = "serde", serde(with = "children_serde"))]
     children: HashMap<K, L>,
 }
 
@@ -758,5 +770,31 @@ impl<K, O> Boxer<UWMap<K, Box<O>>> for UWMap<K, O> {
             UWMap::Remove(k) => UWMap::Remove(k),
             UWMap::Clear => UWMap::Clear,
         }
+    }
+}
+
+// JSON object keys cannot represent EventId (used by nested lists). Encode
+// entries as pairs so every supported map key survives state transfer.
+#[cfg(feature = "serde")]
+mod children_serde {
+    use super::*;
+    use serde::{Deserializer, Serializer};
+
+    pub fn serialize<K: Serialize, L: Serialize, S: Serializer>(
+        children: &HashMap<K, L>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        children.iter().collect::<Vec<_>>().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, K, L, D>(deserializer: D) -> Result<HashMap<K, L>, D::Error>
+    where
+        K: Deserialize<'de> + Eq + Hash,
+        L: Deserialize<'de>,
+        D: Deserializer<'de>,
+    {
+        Ok(Vec::<(K, L)>::deserialize(deserializer)?
+            .into_iter()
+            .collect())
     }
 }

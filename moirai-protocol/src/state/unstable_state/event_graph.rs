@@ -28,6 +28,7 @@ use crate::{
 
 #[cfg_attr(feature = "test_utils", derive(DeepSizeOf))]
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct EventGraph<O> {
     /// Directed Acyclic Graph (DAG) of update events.
     /// - Vertices are update operations tagged with their event id.
@@ -375,6 +376,7 @@ where
 /// Contains EventIds retained for parent discovery, sorted by process and sequence number.
 #[cfg_attr(feature = "test_utils", derive(DeepSizeOf))]
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 struct Cutter(BTreeMap<ReplicaIdx, BTreeMap<usize, NodeIndex>>);
 
 impl Cutter {

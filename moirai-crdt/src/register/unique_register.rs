@@ -27,6 +27,7 @@ pub enum Register<V, P> {
     Write(V),
     Clear,
     // TODO: find a better design pattern
+    #[cfg_attr(feature = "serde", serde(skip))]
     __Marker(std::convert::Infallible, PhantomData<P>),
 }
 

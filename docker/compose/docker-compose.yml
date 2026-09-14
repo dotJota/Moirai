@@ -1,0 +1,246 @@
+# The rig: a bootnode, N replicas that were never told about each other, a relay
+# for the pair that has no route between them, an observer that samples the lot
+# into CSV, and — optionally — a live dashboard.
+#
+# There is no `PEERS` anywhere in this file. That is the point: every replica
+# registers its own address with the directory, reads back the roster, and dials
+# it. Membership is therefore something the run *has* rather than something it
+# was configured with, which is what makes join and leave measurable.
+#
+# # Running it
+#
+# `docker/rig.sh` is the entry point. It builds the image, generates the CRDT
+# crate the image is built from, starts the stack and prints the URLs:
+#
+#     ../rig.sh up --nodes 5 --dashboard
+#     ../rig.sh --help
+#
+# Driving `docker compose` directly works too, and is what the scripts under
+# `experiments/` do — the knobs are the `${...}` defaults below. The one thing
+# to know if you go that way is that the image is built from the directory
+# holding *both* the moirai and arachne checkouts, because it copies from each.
+# Reconstructing that from the Dockerfile is most of why rig.sh exists.
+#
+# # Two bridges, and why the second one
+#
+# `islander` sits on `island` and nowhere else, so it shares no network with the
+# `node` replicas: Docker will not even resolve the address the bootnode hands
+# out for it. Everything that pair replicates goes through the relay, which is
+# on both. That is what makes a plain `up` demonstrate a relayed edge rather
+# than merely being able to.
+#
+# The `node` replicas share the other bridge, so `docker network disconnect`
+# severs one for real — including from the observer, because the control plane
+# rides the same network. That is fine for E4, whose curve is about the
+# survivors. It is not enough for E6, where both halves of a partition must keep
+# writing: use the per-peer `POST /api/pause/<id>` on the replicas, or the island
+# rig in `moirai-network/tests/e2e_convergence.rs`, which gives each replica a
+# network of its own for exactly this reason.
+
+name: moirai
+
+x-image: &image ${MOIRAI_IMAGE:-moirai-json-crdt:test}
+
+# Everything a replica needs that is *not* its identity or its topology. Shared
+# by `node` and `islander` so the two differ only where they are meant to: the
+# island replica is the same replica on a different bridge, and a knob that
+# drifted between them would quietly stop being the same experiment.
+x-replica-env: &replica-env
+  LISTEN_PORT: "9001"
+  HTTP_PORT: "8081"
+  BOOTNODE_URL: "http://bootnode:7000"
+  SESSION_ID: "${SESSION_ID:-compose}"
+  RECONCILE_SECS: "${RECONCILE_SECS:-5}"
+  # `-` rather than `:-`, so an explicitly empty `DASHBOARD_URL=` in the
+  # environment wins and gives a rig with no reporting at all. Pointing at a
+  # dashboard that is not running costs one failed outbound POST every few
+  # seconds, which is what makes attaching one later a second command rather
+  # than a restart.
+  DASHBOARD_URL: "${DASHBOARD_URL-http://dashboard:8090}"
+  PEERS: ""
+
+services:
+  # Directory only. It never sees an operation and holds no model state, so it
+  # can be restarted mid-run without any replica noticing beyond a failed poll.
+  bootnode:
+    image: *image
+    command: ["moirai-bootnode"]
+    environment:
+      BOOTNODE_PORT: "7000"
+      # Comfortably above the replicas' RECONCILE_SECS, so a live replica is
+      # never dropped for being slow.
+      BOOTNODE_TTL_SECS: "${BOOTNODE_TTL_SECS:-30}"
+      # Where a pair with no route to each other can meet. This is the *only*
+      # place a relay is configured: the replicas learn it from the roster, so
+      # `RELAY_ADDR=` gives a rig with no relay at all and nothing else changes.
+      RELAY_ADDR: "${RELAY_ADDR-relay:7100}"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7000/health"]
+      interval: 1s
+      timeout: 2s
+      retries: 60
+    networks: [session, island]
+
+  # Forwards frames between replicas that cannot open a direct connection.
+  #
+  # A separate service from the bootnode, not a convenience: the bootnode is
+  # blob-blind — it sees routing and never model content — and that is what makes
+  # hosting one acceptable. A relay is by definition a data path, so merging them
+  # would end the ability to state it (C-D3). Same image, two processes.
+  #
+  # On both networks, because it has to be reachable from both sides of the pair
+  # it is bridging.
+  relay:
+    image: *image
+    command: ["moirai-relay"]
+    environment:
+      RELAY_PORT: "7100"
+      RELAY_HTTP_PORT: "7101"
+      # `frames_in` vs `frames_out` is where fan-out is visible: one broadcast to
+      # N relayed peers must read as one in and N out.
+      RELAY_VERBOSE: "${RELAY_VERBOSE-}"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:7101/health"]
+      interval: 1s
+      timeout: 2s
+      retries: 60
+    networks: [session, island]
+
+  # Scale this: `docker compose up --scale node=5`.
+  #
+  # Every instance is identical. REPLICA_ID and ADVERTISE_ADDR both default to
+  # the container's own hostname, which Docker's embedded DNS resolves on a
+  # user-defined network, so scaling needs no per-instance configuration and no
+  # entry in this file changes when N does.
+  node:
+    image: *image
+    depends_on:
+      bootnode:
+        condition: service_healthy
+    environment:
+      <<: *replica-env
+      # Blanked deliberately. The image sets `REPLICA_ID=a` as a convenience
+      # for `docker run`, and inheriting it here gave every scaled replica the
+      # same id: five containers registered as `a`, the directory upserted them
+      # onto one entry, and the roster never held more than one peer. Empty is
+      # what makes the `:-` defaults below fire.
+      REPLICA_ID: ""
+      ADVERTISE_ADDR: ""
+    # `$$` is Compose's escape for a literal `$`, so these expand inside the
+    # container rather than on the host.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        REPLICA_ID="$${REPLICA_ID:-$$HOSTNAME}" \
+        ADVERTISE_ADDR="$${ADVERTISE_ADDR:-$$HOSTNAME:$$LISTEN_PORT}" \
+        exec network_node
+    networks: [session]
+
+  # One replica on the *island* network and nowhere else, so it has no route to
+  # any of the `node` replicas and they have none to it. Everything it replicates
+  # goes through the relay, which is what makes `docker compose up` demonstrate a
+  # relayed edge instead of only being able to.
+  #
+  # Not part of `--scale node=N` on purpose: it is a different topology, not
+  # another instance of the same one.
+  islander:
+    image: *image
+    depends_on:
+      bootnode:
+        condition: service_healthy
+      relay:
+        condition: service_healthy
+    environment:
+      <<: *replica-env
+      REPLICA_ID: "islander"
+      # The address it advertises resolves on `island` and nowhere else, which is
+      # what makes the absence of a route real rather than assumed: a `node`
+      # replica cannot even look this name up.
+      ADVERTISE_ADDR: "islander:9001"
+    networks: [island]
+
+  # Samples every replica the directory knows about, into runs/metrics.csv.
+  observer:
+    image: *image
+    depends_on:
+      bootnode:
+        condition: service_healthy
+    environment:
+      BOOTNODE_URL: "http://bootnode:7000"
+      SESSION_ID: "${SESSION_ID:-compose}"
+      HTTP_PORT: "8081"
+      INTERVAL_SECS: "${INTERVAL_SECS:-1}"
+      OUT: "/out/metrics.csv"
+    entrypoint: ["/bin/sh", "/observer/observe.sh"]
+    # Read-only mount rather than baked into the image: the sampling can change
+    # without a rebuild, and a rebuild would change the replica binary too.
+    volumes:
+      - ./observe.sh:/observer/observe.sh:ro
+      - ${MOIRAI_RUN_DIR:-./runs}:/out
+    # The image's healthcheck curls a replica HTTP API this container does not
+    # serve; without this it would sit `unhealthy` forever.
+    healthcheck:
+      disable: true
+    networks: [session, island]
+
+  # Applies one operation per replica per tick. Off by default; bring it up
+  # with `docker compose --profile load up -d`.
+  #
+  # A measurement run needs *every* replica writing — see the header of
+  # drive.sh — so this is not an optional nicety for E4, it is what makes the
+  # baseline comparable.
+  driver:
+    image: *image
+    profiles: [load]
+    depends_on:
+      bootnode:
+        condition: service_healthy
+    environment:
+      BOOTNODE_URL: "http://bootnode:7000"
+      SESSION_ID: "${SESSION_ID:-compose}"
+      HTTP_PORT: "8081"
+      OP_INTERVAL_SECS: "${OP_INTERVAL_SECS:-1}"
+    entrypoint: ["/bin/sh", "/driver/drive.sh"]
+    volumes:
+      - ./drive.sh:/driver/drive.sh:ro
+    healthcheck:
+      disable: true
+    networks: [session, island]
+
+  # The live view. Off by default — "optionally connected" is the requirement,
+  # and a rig that needs its monitoring to run is not optional.
+  #
+  # It binds a port and the replicas do not: they dial *out* to it. That is not
+  # a Compose convenience, it is the deployment this system targets — replicas
+  # are peers on laptops behind NAT, which is the same reason the architecture
+  # has a bootnode with a relay fallback. A dashboard that had to dial into
+  # every replica would work here and nowhere else.
+  dashboard:
+    image: *image
+    profiles: [dashboard]
+    command: ["moirai-dashboard", "--port", "8090"]
+    ports:
+      - "${DASHBOARD_PORT:-8090}:8090"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8090/api/health"]
+      interval: 1s
+      timeout: 2s
+      retries: 60
+    # On both, so `islander` can report too. Being on two bridges does not make
+    # this a route between them: Docker does not forward between user-defined
+    # networks, which is exactly why the replicas on either side still cannot
+    # reach each other.
+    networks: [session, island]
+
+networks:
+  session:
+    name: moirai_session
+    driver: bridge
+  # The bootnode and the relay are on both; `islander` is on this one only. Two
+  # bridges with no shared member between `islander` and the `node` replicas is
+  # what gives the pair genuinely no path — Docker will not resolve the name and
+  # would not route the packet if it did.
+  island:
+    name: moirai_island
+    driver: bridge

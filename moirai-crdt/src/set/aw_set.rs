@@ -1,3 +1,5 @@
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, fmt::Debug, hash::Hash};
 
 #[cfg(feature = "test_utils")]
@@ -21,6 +23,7 @@ use crate::HashSet;
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "test_utils", derive(DeepSizeOf))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum AWSet<V> {
     Add(V),
     Remove(V),

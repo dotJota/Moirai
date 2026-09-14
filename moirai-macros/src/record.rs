@@ -8,6 +8,7 @@ macro_rules! record {
             /// Set of operations that can be applied to the record.
             /// Each operation corresponds to an operation on one of the fields, or a "New" operation to initialize the record.
             #[derive(Clone, Debug)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             pub enum $name {
                 $(
                     [<$field:camel>](<$T as $crate::moirai_protocol::state::log::IsLog>::Op),
@@ -33,6 +34,7 @@ macro_rules! record {
 
             /// Returned value when reading the record, containing the values of all fields.
             #[derive(Debug, Clone, Default, PartialEq)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             pub struct [<$name Value>] {
                 $(
                     pub $field: <$T as $crate::moirai_protocol::state::log::IsLog>::Value,
@@ -41,6 +43,7 @@ macro_rules! record {
 
             /// Record log type, containing a log for each field.
             #[derive(Debug, Default, Clone)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             pub struct [<$name Log>] {
                 $(
                     $field: $T,

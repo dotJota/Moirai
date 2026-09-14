@@ -801,6 +801,21 @@ where
 
     /// Run the main event loop.
     pub fn run(&mut self) {
+        self.run_with_observer(|_, _, _| {});
+    }
+
+    /// Observe incoming messages and the end of each event-loop iteration.
+    /// Incoming messages are borrowed by the observer, then processed normally,
+    /// including applying sync-response batches to the local replica.
+    /// `None` denotes the end of an iteration, after all messages are handled.
+    pub(crate) fn run_with_observer<F>(&mut self, mut observe: F)
+    where
+        F: FnMut(
+            &mut Replica<L, Tcsb<L::Op>>,
+            &mut T,
+            Option<(&PeerId, &TransportMessage<L::Op>)>,
+        ),
+    {
         // The delivery trace is thread-local and delivery happens on this
         // thread, so it can only be switched on from here.
         if self.dashboard.is_some() {
@@ -830,8 +845,11 @@ where
 
             // --- Inbound network messages ---
             while let Ok(Some((from, msg))) = self.transport.try_recv() {
+                observe(&mut self.replica, &mut self.transport, Some((&from, &msg)));
                 self.handle_transport_message(from, msg);
             }
+
+            observe(&mut self.replica, &mut self.transport, None);
 
             // --- Monitoring, if anyone asked for it ---
             self.collect_deliveries();

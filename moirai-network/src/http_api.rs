@@ -37,7 +37,6 @@ pub(crate) fn start_http_api<O: NetworkOp>(
     thread::spawn(move || {
         let addr = format!("0.0.0.0:{}", port);
         let server = Server::http(&addr).expect("Failed to start HTTP server");
-        eprintln!("[{}] HTTP API listening on {}", replica_id, addr);
 
         let add_cors = |mut resp: Response<std::io::Cursor<Vec<u8>>>| {
             resp.add_header(Header::from_bytes(b"Access-Control-Allow-Origin", b"*").unwrap());

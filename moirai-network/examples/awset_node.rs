@@ -10,16 +10,17 @@
 //!
 //! # Usage
 //!
+//! Run from the workspace root with the same JSON configuration files used by
+//! `commit_awset_node`: `replica_id`, `listen_port`, optional `http_port`, and
+//! `peers` (an array of `id:host:port` strings, or an empty array for a single node).
+//!
 //! ```bash
 //! # Single node
-//! REPLICA_ID=a LISTEN_PORT=9001 HTTP_PORT=8081 \
-//!     cargo run --example awset_node
+//! cargo run -p moirai-network --example awset_node -- moirai-commit-network/examples/config_solo.json
 //!
 //! # Two-node cluster
-//! REPLICA_ID=a LISTEN_PORT=9001 HTTP_PORT=8081 PEERS=b:127.0.0.1:9002 \
-//!     cargo run --example awset_node &
-//! REPLICA_ID=b LISTEN_PORT=9002 HTTP_PORT=8082 PEERS=a:127.0.0.1:9001 \
-//!     cargo run --example awset_node &
+//! cargo run -p moirai-network --example awset_node -- moirai-commit-network/examples/config_a.json &
+//! cargo run -p moirai-network --example awset_node -- moirai-commit-network/examples/config_b.json &
 //! ```
 //!
 //! # HTTP API
@@ -63,8 +64,11 @@
 //! ```
 
 use std::env;
+use std::fs::File;
 use std::thread;
 use std::time::Duration;
+
+use serde::Deserialize;
 
 use moirai_crdt::set::aw_set::AWSet;
 use moirai_network::composite::CompositeTransport;
@@ -77,6 +81,14 @@ use moirai_protocol::event::Event;
 use moirai_protocol::replica::{IsReplica, Replica};
 use moirai_protocol::state::log::IsLog;
 use moirai_protocol::state::po_log::VecLog;
+
+#[derive(Debug, Deserialize)]
+struct Config {
+    replica_id: String,
+    listen_port: u16,
+    http_port: Option<u16>,
+    peers: Vec<String>,
+}
 
 // Newtype wrapper to implement QueryableLog (Rust orphan rules require a local type)
 #[derive(Debug, Clone, Default)]
@@ -141,18 +153,22 @@ impl moirai_network::query::QueryableLog for AWSetLog {
 }
 
 fn main() {
-    let replica_id = env::var("REPLICA_ID").unwrap_or_else(|_| "replica-a".to_string());
-    let listen_port: u16 = env::var("LISTEN_PORT")
-        .unwrap_or_else(|_| "9001".to_string())
-        .parse()
-        .expect("Invalid LISTEN_PORT");
-    let http_port: Option<u16> = env::var("HTTP_PORT").ok().and_then(|p| p.parse().ok());
-    let peers_str = env::var("PEERS").unwrap_or_default();
+    let file_path = env::args_os()
+        .nth(1)
+        .expect("Usage: awset_node <config.json>");
+    let file = File::open(&file_path).expect("Failed to open configuration file");
+    let Config {
+        replica_id,
+        listen_port,
+        http_port,
+        peers,
+    } = serde_json::from_reader::<_, Config>(file)
+        .expect("The file provided doesn't match the configuration specification.");
 
-    // Parse PEERS=id:host:port,...
+    // Parse each peer as id:host:port, matching commit_awset_node.
     let mut peer_addresses: HashMap<String, String> = HashMap::default();
     let mut all_members: Vec<String> = vec![replica_id.clone()];
-    for spec in peers_str.split(',').filter(|s| !s.is_empty()) {
+    for spec in &peers {
         let parts: Vec<&str> = spec.split(':').collect();
         if parts.len() >= 3 {
             let peer_id = parts[0].to_string();

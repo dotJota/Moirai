@@ -232,7 +232,7 @@ fn main() {
         node_config.replica_id, node_config.http_port.unwrap_or(0));
 
     // Run the event loop
-    let mut node = GenericCommitNode::new(node, Duration::from_secs(1), 3);
+    let mut node = GenericCommitNode::new(node, Duration::from_secs(10), 1);
     node.run_with_oracle(|replica, network_omega| {
         *replica.state_mut().0.oracle_mut() = network_omega
             .query()

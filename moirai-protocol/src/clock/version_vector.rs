@@ -18,7 +18,7 @@ use crate::{
 pub type Seq = usize;
 
 #[cfg_attr(feature = "test_utils", derive(DeepSizeOf))]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct VersionEntries(pub(super) Vec<Seq>);
 
 impl VersionEntries {
@@ -70,7 +70,7 @@ impl VersionEntries {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 #[cfg_attr(feature = "test_utils", derive(DeepSizeOf))]
 pub struct Version {
     pub(super) entries: VersionEntries,

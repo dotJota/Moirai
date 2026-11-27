@@ -46,12 +46,15 @@ def figure_html(figure):
 def describe_conditions(conditions):
     config = json.loads(conditions)
     settings = config["replica_settings"]
+    limit = config.get("network_limit")
+    network = (f"egress {limit['rate_kbit_s']} kbit/s, burst {limit['burst_bytes']} bytes, "
+               f"queue latency {limit['latency_ms']} ms" if limit else "unlimited egress")
     fault = "healthy" if config["fault_after_s"] is None else f'crash at {config["fault_after_s"]} s'
     return (
         f'Benchmark v{config["benchmark_version"]}, {config["duration_s"]} s, {config["query_percent"]}% queries, {config["add_percent"]}% adds, '
         f'{config["key_space"]} keys, queue {config["queue_capacity"]}, {fault}, '
         f'sample {config["sample_interval_ms"]} ms, grace {config["grace_s"]} s, '
-        f'interface {config["network_interface"]}, pull {settings["pull_interval_ms"]} ms / '
+        f'interface {config["network_interface"]}, {network}, pull {settings["pull_interval_ms"]} ms / '
         f'{settings["pull_peer_count"]} peers, no-op {settings["noop_interval_ms"]} ms, '
         f'oracle timeout {settings["event_timeout_ms"]} ms'
     )

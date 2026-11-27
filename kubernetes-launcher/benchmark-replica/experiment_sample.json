@@ -20,6 +20,12 @@
   },
   "sample_interval_ms": 1000,
   "network_interface": "eth0",
+  "network_limit": {
+    "rate_kbit_s": 10000,
+    "burst_bytes": 32768,
+    "latency_ms": 100,
+    "tools_image": "moirai-network-tools:dev"
+  },
   "grace_s": 5,
   "startup_timeout_s": 180,
   "drain_timeout_s": 120,

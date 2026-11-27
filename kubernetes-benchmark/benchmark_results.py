@@ -41,6 +41,7 @@ class Run:
             "replica_settings", "sample_interval_ms", "network_interface", "grace_s", "fault_after_s",
         )}
         common["benchmark_version"] = self.version
+        common["network_limit"] = settings.get("network_limit")
         common.update({key: workload[key] for key in (
             "duration_s", "query_percent", "add_percent", "key_space", "queue_capacity",
         )})

@@ -35,6 +35,17 @@ def run():
 
 
 class IntervalTests(unittest.TestCase):
+    def test_network_limits_separate_experimental_conditions(self):
+        baseline = run()
+        shaped = run()
+        shaped.config['network_limit'] = None
+        self.assertEqual(baseline.conditions, shaped.conditions)
+        shaped.config['network_limit'] = dict(rate_kbit_s=10000, burst_bytes=32768,
+                                            latency_ms=100, tools_image='tools:dev')
+        self.assertNotEqual(baseline.conditions, shaped.conditions)
+        from benchmark_viewer import describe_conditions
+        self.assertIn('egress 10000 kbit/s', describe_conditions(shaped.conditions))
+
     def test_default_preserves_drain_rate_and_seal_latencies(self):
         r = run()
         self.assertEqual(achieved_throughput(r), 24 / 5)

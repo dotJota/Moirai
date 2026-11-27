@@ -36,10 +36,12 @@ def keys(data, expected):
 
 
 def validate(config):
+    # Older experiment files remain unshaped unless explicitly configured.
+    config = {**config, "network_limit": config.get("network_limit")}
     keys(config, {
         "simulation_name", "n_replicas", "protocol", "replica_image", "replica_settings",
         "workload", "sample_interval_ms", "network_interface", "grace_s",
-        "startup_timeout_s", "drain_timeout_s", "fault_after_s",
+        "startup_timeout_s", "drain_timeout_s", "fault_after_s", "network_limit",
     })
     name = config["simulation_name"]
     if not isinstance(name, str) or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,119}", name):
@@ -53,6 +55,14 @@ def validate(config):
     interface = config["network_interface"]
     if not isinstance(interface, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", interface):
         raise ValueError("network_interface must name a Linux network interface")
+    limit = config["network_limit"]
+    if limit is not None:
+        keys(limit, {"rate_kbit_s", "burst_bytes", "latency_ms", "tools_image"})
+        integer(limit, "rate_kbit_s", 1, 1_000_000_000)
+        integer(limit, "burst_bytes", 1, 2**32 - 1)
+        integer(limit, "latency_ms", 1, 86_400_000)
+        if not isinstance(limit["tools_image"], str) or not limit["tools_image"].strip():
+            raise ValueError("network_limit.tools_image must be a nonempty image reference")
     integer(config, "sample_interval_ms", 1, 60_000)
     integer(config, "grace_s", 0, 86_400)
     integer(config, "startup_timeout_s", 1, 86_400)
@@ -104,6 +114,28 @@ def replica_config(config, index):
     }
 
 
+def network_init_containers(config):
+    limit = config.get("network_limit")
+    if limit is None:
+        return {}
+    return {"initContainers": [{
+        "name": "configure-bandwidth", "image": limit["tools_image"],
+        "imagePullPolicy": "IfNotPresent",
+        "securityContext": {
+            "runAsNonRoot": False, "runAsUser": 0, "runAsGroup": 0,
+            "allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True,
+            "capabilities": {"drop": ["ALL"], "add": ["NET_ADMIN"]},
+        },
+        "command": ["tc"],
+        "args": [
+            "qdisc", "replace", "dev", config["network_interface"], "root", "tbf",
+            "rate", f"{limit['rate_kbit_s']}kbit",
+            "burst", str(limit["burst_bytes"]),
+            "latency", f"{limit['latency_ms']}ms",
+        ],
+    }]}
+
+
 def manifest(config):
     labels = {"app": "moirai-commit-benchmark"}
     replication_ports = [("replication", REPLICA_PORT)]
@@ -126,6 +158,7 @@ def manifest(config):
             {
                 "apiVersion": "v1", "kind": "Pod", "metadata": {"name": name, "labels": labels},
                 "spec": {
+                    **network_init_containers(config),
                     "hostname": name, "subdomain": SERVICE,
                     "restartPolicy": "Never", "terminationGracePeriodSeconds": 1,
                     "automountServiceAccountToken": False,

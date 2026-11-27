@@ -11,8 +11,12 @@ docker build -f kubernetes-launcher/Dockerfile \
   --build-arg REPLICA_EXAMPLE=benchmark -t moirai-replica-benchmark:dev .
 ```
 ```sh
+docker build -f kubernetes-launcher/benchmark-replica/Dockerfile.network-tools \
+  -t moirai-network-tools:dev kubernetes-launcher/benchmark-replica
+```
+```sh
 # For kind, make the image available to every worker before launching.
-kind load docker-image moirai-replica-benchmark:dev
+kind load docker-image moirai-replica-benchmark:dev moirai-network-tools:dev
 ```
 ```sh
 bash kubernetes-launcher/benchmark-replica/benchmark_launch.sh \
@@ -20,7 +24,8 @@ bash kubernetes-launcher/benchmark-replica/benchmark_launch.sh \
 ```
 
 For a remote cluster, publish the image to a registry reachable by the
-workers and put its tag or digest in `replica_image`.
+workers and put its tag or digest in `replica_image`. Publish the network-tools
+image as well and set `network_limit.tools_image` to its registry reference.
 
 The launcher creates a fresh namespace with a headless Service, one Pod
 and one ConfigMap per replica. The replicas use stable Pod DNS names and
@@ -92,3 +97,84 @@ for generation and plotting.
 
 Run the log-recovery checks from the project root with
 `python3 -m unittest discover -s kubernetes-launcher/benchmark-replica -p 'test_replica_logs.py'`.
+
+## Per-replica bandwidth limits
+
+The sample enables a 10 Mbit/s aggregate egress budget on each replica's
+`network_interface`. Set `network_limit` to `null` to disable shaping;
+older files without this field also remain unlimited.
+
+| `network_limit` field | Meaning |
+|---|---|
+| `rate_kbit_s` | Positive integer sustained rate in decimal kilobits per second (10000 = 10 Mbit/s). |
+| `burst_bytes` | Positive integer token-bucket burst size in bytes (sample: 32768). |
+| `latency_ms` | Positive integer TBF maximum queueing-time parameter in milliseconds (sample: 100). |
+| `tools_image` | Image containing `tc`, built with `Dockerfile.network-tools`. |
+
+Queue latency determines the buffer size; it does not inject a fixed network
+delay. Burst size must suit the MTU and requested rate; very small bursts can
+prevent packets from being sent or reduce achievable throughput. Calibrate
+these settings on the target nodes before collecting measurements.
+
+Each Pod gets a `configure-bandwidth` init container that installs the TBF
+qdisc before the replica starts. Only this container runs as root with
+`NET_ADMIN`; the application retains its existing non-root security settings.
+The cluster must permit that capability and the nodes must support TBF.
+A failed init prevents the replica from starting, and the launcher's startup
+timeout fails the experiment instead of silently running it without limits.
+Inspect failures with `kubectl -n NAMESPACE logs POD -c configure-bandwidth`
+and `kubectl -n NAMESPACE describe pod POD`.
+
+All egress on the selected interface shares one budget, including causal
+replication on 19001, Creek consensus on 19002, and administrative responses
+sent over that interface. This does not cap aggregate ingress or allocate a
+separate budget per peer. No CNI annotations are used.
+The launcher records the settings in `experiment.json` and the generated rules
+in `manifest.json`. Generated experiment suites inherit the settings from their
+base configuration. Result grouping separates different network limits.
+
+### Saturated-transfer calibration
+
+Before paper measurements, test on disposable Pods using the same init rules
+and node placement as the benchmark. The tools image includes `iperf3` for this
+purpose. For example, render two probe Pods from the sample (run from the repo
+root), replacing only their application containers:
+
+```sh
+python3 - <<'PYPROBE' > /tmp/moirai-bandwidth-probe.json
+import json, sys
+sys.path.insert(0, 'kubernetes-launcher/benchmark-replica')
+from benchmark_config import manifest, validate
+with open('kubernetes-launcher/benchmark-replica/experiment_sample.json') as f:
+    config = validate(json.load(f))
+config['n_replicas'] = 2
+pods = [obj for obj in manifest(config)['items'] if obj['kind'] == 'Pod']
+for pod in pods:
+    spec = pod['spec']
+    spec.pop('volumes')
+    spec.pop('subdomain')
+    spec['containers'] = [{
+        'name': 'probe', 'image': config['network_limit']['tools_image'],
+        'command': ['iperf3'], 'args': ['-s'],
+        'securityContext': {'allowPrivilegeEscalation': False,
+                            'capabilities': {'drop': ['ALL']}}
+    }]
+print(json.dumps({'apiVersion': 'v1', 'kind': 'List', 'items': pods}))
+PYPROBE
+kubectl create namespace moirai-bandwidth-probe
+kubectl -n moirai-bandwidth-probe create -f /tmp/moirai-bandwidth-probe.json
+kubectl -n moirai-bandwidth-probe wait --for=condition=Ready pod --all --timeout=180s
+peer_ip=$(kubectl -n moirai-bandwidth-probe get pod benchmark-replica-1 -o jsonpath='{.status.podIP}')
+kubectl -n moirai-bandwidth-probe exec benchmark-replica-0 -c probe -- tc -s qdisc show dev eth0
+kubectl -n moirai-bandwidth-probe exec benchmark-replica-0 -c probe -- iperf3 -c "$peer_ip" -t 30 -O 3 -P 4
+kubectl -n moirai-bandwidth-probe exec benchmark-replica-0 -c probe -- iperf3 -c "$peer_ip" -t 30 -O 3 -P 4 -R
+kubectl delete namespace moirai-bandwidth-probe
+```
+
+Use the configured interface instead of `eth0` if changed. Inspect the qdisc
+and the aggregate throughput across streams in both directions: payload
+throughput should be near, but below, the configured rate due to protocol
+overhead. Compare with an unlimited baseline to establish that the underlying
+network can exceed the requested rate. Repeat across the node placements used
+in experiments and retain the outputs alongside measurement results. This
+calibration runs separately so its traffic does not contaminate benchmarks.
